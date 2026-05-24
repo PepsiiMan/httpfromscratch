@@ -5,6 +5,7 @@ import (
 	"errors"
 	"httpfromscratch/internal/headers"
 	"io"
+	"strconv"
 	"unicode"
 )
 
@@ -13,6 +14,7 @@ type RequestState int
 const (
 	Initialized RequestState = iota
 	ParsingHeaders
+	ParsingBody
 	Done
 )
 
@@ -20,12 +22,14 @@ type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
 	state       RequestState
+	Body        []byte
 }
 
 func newRequest() *Request {
 	return &Request{
 		state:   Initialized,
 		Headers: headers.NewHeaders(),
+		Body:    []byte{},
 	}
 }
 
@@ -71,7 +75,33 @@ outer:
 			read += n
 
 			if b {
+				r.state = ParsingBody
+			}
+
+		case ParsingBody:
+			if _, ok := r.Headers["content-length"]; !ok {
 				r.state = Done
+				break outer
+			}
+			r.Body = append(r.Body, data[read:]...)
+
+			read += len(data[read:])
+
+			cl, err := strconv.Atoi(r.Headers.Get("Content-Length"))
+			if err != nil {
+				return read, errors.New("malformed content-length")
+			}
+
+			if len(r.Body) > cl {
+				return read, errors.New("body larger than declared content-length")
+			}
+
+			if len(r.Body) == cl {
+				r.state = Done
+			}
+
+			if len(r.Body) < cl {
+				break outer
 			}
 
 		case Done:
@@ -134,6 +164,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				if request.state == ParsingBody {
+					return nil, errors.New("body shorter than declared content-length")
+				}
 				request.state = Done
 				break
 			}
