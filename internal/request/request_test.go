@@ -13,7 +13,7 @@ import (
 func TestRequestLineParse(t *testing.T) {
 
 	reader := &chunkReader{
-		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "GET / HTTP/1.1\r\nHost: localhost:8182\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
 		numBytesPerRead: 3,
 	}
 	r, err := RequestFromReader(reader)
@@ -25,7 +25,7 @@ func TestRequestLineParse(t *testing.T) {
 
 	// Test: Good GET Request line with path
 	reader = &chunkReader{
-		data:            "GET /coffee HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "GET /coffee HTTP/1.1\r\nHost: localhost:8182\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
 		numBytesPerRead: 1,
 	}
 	r, err = RequestFromReader(reader)
@@ -37,7 +37,7 @@ func TestRequestLineParse(t *testing.T) {
 
 	// Test: Invalid number of parts in request line
 	reader = &chunkReader{
-		data:            "/coffee HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "/coffee HTTP/1.1\r\nHost: localhost:8182\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
 		numBytesPerRead: 2,
 	}
 	_, err = RequestFromReader(reader)
@@ -45,7 +45,7 @@ func TestRequestLineParse(t *testing.T) {
 
 	// Test: Invalid version in request line
 	reader = &chunkReader{
-		data:            "/coffee HTTP/1.2\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "/coffee HTTP/1.2\r\nHost: localhost:8182\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
 		numBytesPerRead: 3,
 	}
 	_, err = RequestFromReader(reader)
@@ -53,11 +53,71 @@ func TestRequestLineParse(t *testing.T) {
 
 	// Test: Invalid method in request line (out of order)
 	reader = &chunkReader{
-		data:            "/coffee GET HTTP/1.2\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "/coffee GET HTTP/1.2\r\nHost: localhost:8182\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
 		numBytesPerRead: 4,
 	}
 	_, err = RequestFromReader(reader)
 	require.Error(t, err)
+}
+
+func TestRequestWithHeaders(t *testing.T) {
+	// Test: Standard Headers
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:8182\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err := RequestFromReader(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "localhost:8182", r.Headers["host"])
+	assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+	assert.Equal(t, "*/*", r.Headers["accept"])
+
+	// Test: Malformed Header
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost localhost:8182\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err = RequestFromReader(reader)
+	require.Error(t, err)
+
+	// Test: Missing end of header
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:8182\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err = RequestFromReader(reader)
+	require.NoError(t, err)
+
+	// Test: case insensitive headers
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHOST: localhost:8182\r\nUser-AGENt: curl/7.81.0\r\nACCePt: */*\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err = RequestFromReader(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "localhost:8182", r.Headers["host"])
+	assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+	assert.Equal(t, "*/*", r.Headers["accept"])
+
+	// Empty headers
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err = RequestFromReader(reader)
+	require.NoError(t, err)
+
+	// Duplicate headers
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nhost: localhost:8182\r\nHost: localhost:8182\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err = RequestFromReader(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "localhost:8182, localhost:8182", r.Headers["host"])
 }
 
 type chunkReader struct {
@@ -72,10 +132,7 @@ func (cr *chunkReader) Read(p []byte) (n int, err error) {
 	if cr.pos >= len(cr.data) {
 		return 0, io.EOF
 	}
-	endIndex := cr.pos + cr.numBytesPerRead
-	if endIndex > len(cr.data) {
-		endIndex = len(cr.data)
-	}
+	endIndex := min(cr.pos+cr.numBytesPerRead, len(cr.data))
 	n = copy(p, cr.data[cr.pos:endIndex])
 	cr.pos += n
 

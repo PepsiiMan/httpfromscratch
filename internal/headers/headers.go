@@ -3,7 +3,15 @@ package headers
 import (
 	"bytes"
 	"errors"
+	"strings"
+	"unicode"
 )
+
+const specialChars = "!#$%&'*+-.^_`|~"
+
+func isSpecialChar(r rune) bool {
+	return strings.ContainsRune(specialChars, r)
+}
 
 var SEPARATOR = []byte("\r\n")
 
@@ -29,7 +37,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	headerparts := bytes.SplitN(header, []byte(":"), 2)
 
 	if len(headerparts) != 2 {
-		return
+		return 0, false, errors.New("malformed field-line")
 	}
 
 	idx = bytes.Index(headerparts[0], []byte(" "))
@@ -37,9 +45,20 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	if idx != -1 {
 		return 0, false, errors.New("malformed field-line")
 	}
-	key := headerparts[0]
-	value := bytes.ReplaceAll(headerparts[1], []byte(" "), []byte{})
-	h[string(key)] = string(value)
+	key := strings.ToLower(string(headerparts[0]))
+	value := string(bytes.ReplaceAll(headerparts[1], []byte(" "), []byte{}))
+
+	for _, r := range key {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !isSpecialChar(r) {
+			return 0, false, errors.New("invalid character in field-line")
+		}
+	}
+
+	if _, ok := h[key]; ok {
+		h[key] = h[key] + ", " + value
+	} else {
+		h[key] = value
+	}
 
 	return n, false, nil
 }

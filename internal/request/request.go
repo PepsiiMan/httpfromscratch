@@ -3,6 +3,7 @@ package request
 import (
 	"bytes"
 	"errors"
+	"httpfromscratch/internal/headers"
 	"io"
 	"unicode"
 )
@@ -11,17 +12,20 @@ type RequestState int
 
 const (
 	Initialized RequestState = iota
+	ParsingHeaders
 	Done
 )
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     headers.Headers
 	state       RequestState
 }
 
 func newRequest() *Request {
 	return &Request{
-		state: Initialized,
+		state:   Initialized,
+		Headers: headers.NewHeaders(),
 	}
 }
 
@@ -50,7 +54,25 @@ outer:
 			r.RequestLine = *rl
 			read += n
 
-			r.state = Done
+			r.state = ParsingHeaders
+
+		case ParsingHeaders:
+
+			n, b, err := r.Headers.Parse(data[read:])
+
+			if err != nil {
+				return 0, err
+			}
+
+			if n == 0 {
+				break outer
+			}
+
+			read += n
+
+			if b {
+				r.state = Done
+			}
 
 		case Done:
 			break outer
