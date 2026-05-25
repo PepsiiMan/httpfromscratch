@@ -1,6 +1,7 @@
 package response
 
 import (
+	"errors"
 	"fmt"
 	"httpfromscratch/internal/headers"
 	"io"
@@ -15,7 +16,32 @@ const (
 	InternalServerError StatusCode = 500
 )
 
-func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
+type WriterState int
+
+const (
+	writingStatusLine WriterState = iota
+	writingHeaders
+	writingBody
+	writingDone
+)
+
+type Writer struct {
+	w           io.Writer
+	writerState WriterState
+}
+
+func NewWriter(w io.Writer) *Writer {
+	return &Writer{
+		w:           w,
+		writerState: writingStatusLine,
+	}
+}
+
+func (writer *Writer) WriteStatusLine(statusCode StatusCode) error {
+	if writer.writerState != writingStatusLine {
+		return errors.New("writing response out of order")
+	}
+
 	statusLine := strings.Builder{}
 	statusLine.WriteString("HTTP/1.1 ")
 	fmt.Fprint(&statusLine, statusCode)
@@ -29,11 +55,13 @@ func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
 
 	}
 	statusLine.WriteString("\r\n")
-	_, err := w.Write([]byte(statusLine.String()))
+	_, err := writer.w.Write([]byte(statusLine.String()))
 
 	if err != nil {
 		return err
 	}
+
+	writer.writerState = writingHeaders
 
 	return nil
 }
@@ -41,14 +69,18 @@ func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
 func GetDefaultHeaders(contentLen int) headers.Headers {
 	h := headers.NewHeaders()
 
-	h["Content-Length"] = fmt.Sprint(contentLen)
-	h["Connection"] = "close"
-	h["Content-Type"] = "text/plain"
+	h.Set("Content-Length", fmt.Sprint(contentLen))
+	h.Set("Connection", "close")
+	h.Set("Content-Type", "text/plain")
 
 	return h
 }
 
-func WriteHeaders(w io.Writer, headers headers.Headers) error {
+func (writer *Writer) WriteHeaders(headers headers.Headers) error {
+	if writer.writerState != writingHeaders {
+		return errors.New("writing response out of order")
+	}
+
 	headersString := strings.Builder{}
 	for k, v := range headers {
 		headersString.WriteString(k)
@@ -58,11 +90,24 @@ func WriteHeaders(w io.Writer, headers headers.Headers) error {
 	}
 	headersString.WriteString("\r\n")
 
-	_, err := w.Write([]byte(headersString.String()))
+	_, err := writer.w.Write([]byte(headersString.String()))
 
 	if err != nil {
 		return err
 	}
 
+	writer.writerState = writingBody
+
 	return nil
+}
+
+func (writer *Writer) WriteBody(p []byte) (int, error) {
+	if writer.writerState != writingBody {
+		return 0, errors.New("writing response out of order")
+	}
+
+	n, err := writer.w.Write(p)
+
+	writer.writerState = writingDone
+	return n, err
 }

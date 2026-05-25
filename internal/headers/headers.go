@@ -25,6 +25,20 @@ func (h Headers) Get(key string) string {
 	return h[strings.ToLower(key)]
 }
 
+func (h Headers) Reset(key string, value string) {
+	h[strings.ToLower(key)] = value
+}
+
+func (h Headers) Set(key string, value string) {
+	key = strings.ToLower(key)
+	val, ok := h[key]
+	if ok {
+		h[key] = val + ", " + value
+	} else {
+		h[key] = value
+	}
+}
+
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	idx := bytes.Index(data, SEPARATOR)
 	switch idx {

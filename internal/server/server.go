@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"httpfromscratch/internal/request"
 	"httpfromscratch/internal/response"
+	"io"
 	"log"
 	"net"
 	"sync/atomic"
@@ -17,19 +18,50 @@ import (
 
 //var response []byte = []byte(string(responseString))
 
+type HandlerError struct {
+	Message string
+	Status  response.StatusCode
+}
+
+func (h HandlerError) writeError(w io.Writer) error {
+	m := []byte(h.Message)
+	writer := response.NewWriter(w)
+	err := writer.WriteStatusLine(h.Status)
+	if err != nil {
+		return err
+	}
+
+	headers := response.GetDefaultHeaders(len(m))
+
+	err = writer.WriteHeaders(headers)
+	if err != nil {
+		return err
+	}
+
+	_, err = writer.WriteBody(m)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type Handler func(w *response.Writer, req *request.Request)
+
 type Server struct {
 	listener net.Listener
 	closed   atomic.Bool
+	handler  Handler
 }
 
-func Serve(port int) (*Server, error) {
-	l, err := net.Listen("tcp", ":"+fmt.Sprint(port))
+func Serve(port int, handler Handler) (*Server, error) {
+	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Server{listener: l}
+	s := &Server{listener: l, handler: handler}
 
 	go s.listen()
 
@@ -48,30 +80,50 @@ func (s *Server) listen() {
 		if err != nil {
 			if !s.closed.Load() {
 				log.Println("Connection error:", err)
+				continue
 			}
 			return
 		}
-
-		_, err = request.RequestFromReader(conn)
-
-		if err != nil {
-			log.Println("Invalid request:", err)
-		}
-
 		go s.handle(conn)
-
 	}
 }
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	err := response.WriteStatusLine(conn, 200)
-	if err != nil && !s.closed.Load() {
-		log.Println("error during response writing:", err)
+	writer := response.NewWriter(conn)
+	req, err := request.RequestFromReader(conn)
+
+	if err != nil {
+		errbytes := []byte(err.Error())
+		writer.WriteStatusLine(response.BadRequest)
+		writer.WriteHeaders(response.GetDefaultHeaders(len(errbytes)))
+		writer.WriteBody(errbytes)
+		return
 	}
-	headers := response.GetDefaultHeaders(0)
-	err = response.WriteHeaders(conn, headers)
-	if err != nil && !s.closed.Load() {
-		log.Println("error during response writing:", err)
-	}
+
+	//buffer := bytes.NewBuffer([]byte{})
+
+	s.handler(writer, req)
+
+	//if h != nil {
+	//	err = h.writeError(conn)
+	//	if err != nil && !s.closed.Load() {
+	//		log.Println("error during response writing:", err)
+	//	}
+	//	return
+	//}
+
+	//headers := response.GetDefaultHeaders(buffer.Len())
+	//err = writer.WriteStatusLine(200)
+	//if err != nil && !s.closed.Load() {
+	//	log.Println("error during response writing:", err)
+	//}
+	//err = writer.WriteHeaders(headers)
+	//if err != nil && !s.closed.Load() {
+	//	log.Println("error during response writing:", err)
+	//}
+	//_, err = writer.WriteBody(buffer.Bytes())
+	//if err != nil && !s.closed.Load() {
+	//	log.Println("error during response writing:", err)
+	//}
 }
