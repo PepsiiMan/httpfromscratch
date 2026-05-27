@@ -119,14 +119,31 @@ var handler server.Handler = func(w *response.Writer, req *request.Request) {
 			trailers.Set("X-Content-Length", fmt.Sprint(len(fullBody)))
 
 		}
-	}
+	} else if req.RequestLine.Method == "GET" && req.RequestLine.RequestTarget == "/video" {
+		video, err := os.ReadFile("assets/vim.mp4")
+		if err != nil {
+			log.Println(err)
+			html := writeHTMLStub("500 Internal Server Error", "Internal Server Error", "Okay, you know what? this one is on me.")
+			headers := response.GetDefaultHeaders(len(html))
+			headers.Reset("Content-Type", "text/html")
+			w.WriteStatusLine(response.InternalServerError)
+			w.WriteHeaders(headers)
+			w.WriteBody(html)
+		}
+		headers := response.GetDefaultHeaders(len(video))
+		headers.Reset("Content-Type", "video/mp4")
+		w.WriteStatusLine(response.Ok)
+		w.WriteHeaders(headers)
+		w.WriteBody(video)
+	} else {
 
-	html := writeHTMLStub("200 OK", "Success!", "Your request was an absolute banger.")
-	headers := response.GetDefaultHeaders(len(html))
-	headers.Reset("Content-Type", "text/html")
-	w.WriteStatusLine(response.Ok)
-	w.WriteHeaders(headers)
-	w.WriteBody(html)
+		html := writeHTMLStub("200 OK", "Success!", "Your request was an absolute banger.")
+		headers := response.GetDefaultHeaders(len(html))
+		headers.Reset("Content-Type", "text/html")
+		w.WriteStatusLine(response.Ok)
+		w.WriteHeaders(headers)
+		w.WriteBody(html)
+	}
 }
 
 func writeHTMLStub(title string, h1 string, p string) []byte {
