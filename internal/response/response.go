@@ -16,6 +16,8 @@ const (
 	InternalServerError StatusCode = 500
 )
 
+var SEPARATOR []byte = []byte("\r\n")
+
 type WriterState int
 
 const (
@@ -110,4 +112,42 @@ func (writer *Writer) WriteBody(p []byte) (int, error) {
 
 	writer.writerState = writingDone
 	return n, err
+}
+
+func (writer *Writer) WriteChunkedBody(p []byte) (int, error) {
+	p = append(p, SEPARATOR...)
+	n, err := writer.w.Write(p)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+
+}
+
+func (writer *Writer) WriteChunkedBodyDone() (int, error) {
+	n, err := writer.w.Write([]byte("0\r\n\r\n"))
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (writer *Writer) WriteTrailers(headers headers.Headers) error {
+
+	headersString := strings.Builder{}
+	for k, v := range headers {
+		headersString.WriteString(k)
+		headersString.WriteString(": ")
+		headersString.WriteString(v)
+		headersString.WriteString("\r\n")
+	}
+	headersString.WriteString("\r\n")
+
+	_, err := writer.w.Write([]byte(headersString.String()))
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

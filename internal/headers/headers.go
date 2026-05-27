@@ -39,6 +39,11 @@ func (h Headers) Set(key string, value string) {
 	}
 }
 
+func (h Headers) Delete(key string) {
+	key = strings.ToLower(key)
+	delete(h, key)
+}
+
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	idx := bytes.Index(data, SEPARATOR)
 	switch idx {
